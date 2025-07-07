@@ -37,3 +37,8 @@ flutter pub get
 ```bash
 flutter run
 ```
+
+Untuk menyimpan hasil history deteksi bisa digabungkan dengan backend flask pada repository
+```bash
+https://github.com/berliani/yolodetection-backend
+```
