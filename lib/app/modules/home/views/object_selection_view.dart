@@ -17,8 +17,10 @@ class ObjectSelectionPage extends StatelessWidget {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            
-            controller.setMode(DetectionMode.search);
+        
+            if (controller.selectedClass.value.isEmpty) {
+              controller.setMode(DetectionMode.navigation);
+            }
             Get.back();
           },
         ),
@@ -51,8 +53,10 @@ class ObjectSelectionPage extends StatelessWidget {
             Expanded(
               child: Obx(() {
                 final filtered = indonesianLabels.entries
-                    .where((entry) =>
-                        entry.value.toLowerCase().contains(searchQuery.value))
+                    .where(
+                      (entry) =>
+                          entry.value.toLowerCase().contains(searchQuery.value),
+                    )
                     .toList();
 
                 if (filtered.isEmpty) {
@@ -69,7 +73,8 @@ class ObjectSelectionPage extends StatelessWidget {
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 6),
                       // Hapus widget Center di sini
-                      child: ElevatedButton( // <--- Langsung ElevatedButton
+                      child: ElevatedButton(
+                        // <--- Langsung ElevatedButton
                         style: ElevatedButton.styleFrom(
                           backgroundColor: isSelected
                               ? Colors.blue[400]
@@ -77,7 +82,10 @@ class ObjectSelectionPage extends StatelessWidget {
                           foregroundColor: isSelected
                               ? Colors.white
                               : Colors.black,
-                          minimumSize: const Size(double.infinity, 60), // <--- Ubah ini
+                          minimumSize: const Size(
+                            double.infinity,
+                            60,
+                          ), // <--- Ubah ini
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),

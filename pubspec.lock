@@ -99,6 +99,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  flutter_tts:
+    dependency: "direct main"
+    description:
+      name: flutter_tts
+      sha256: bdf2fc4483e74450dc9fc6fe6a9b6a5663e108d4d0dad3324a22c8e26bf48af4
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.2.3"
   flutter_web_plugins:
     dependency: transitive
     description: flutter
@@ -353,10 +361,10 @@ packages:
     dependency: "direct main"
     description:
       name: ultralytics_yolo
-      sha256: abc9e5ef165cc944930848cecfc8ee77b36df7e2a51c688471c10f619400d3a7
+      sha256: d9ea7dfa3e4634eea284aaf91aef6f218d23097d2a33bd1124dbd6ef8e9c70b7
       url: "https://pub.dev"
     source: hosted
-    version: "0.1.13"
+    version: "0.1.19"
   uuid:
     dependency: transitive
     description:

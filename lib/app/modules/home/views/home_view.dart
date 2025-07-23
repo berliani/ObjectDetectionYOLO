@@ -5,12 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:ultralytics_yolo/ultralytics_yolo.dart';
 import 'package:yolodetection/app/modules/home/controllers/home_controller.dart';
 import 'package:yolodetection/app/modules/home/views/object_selection_view.dart';
 
-// === Position Format===
 class PositionHelper {
   static String getHorizontalCategory(double xCenter) {
     if (xCenter < 0.33) return "KIRI";
@@ -32,15 +31,13 @@ class PositionHelper {
 
   static String getFormattedPosition(String position) {
     final parts = position.split('-');
-    if (parts.length == 2) {
-      return "${parts[0]} - ${parts[1]}";
-    }
-    return position;
+    return parts.length == 2 ? "${parts[0]} - ${parts[1]}" : position;
   }
 }
 
 class YoloPage extends StatefulWidget {
   const YoloPage({Key? key}) : super(key: key);
+
   @override
   State<YoloPage> createState() => _YoloPageState();
 }
@@ -49,7 +46,6 @@ class _YoloPageState extends State<YoloPage> {
   final YoloController controller = Get.put(YoloController());
   final GlobalKey _previewContainerKey = GlobalKey();
 
-// === Capture object detect ===
   Future<Uint8List?> _capturePng() async {
     try {
       RenderRepaintBoundary? boundary =
@@ -68,20 +64,20 @@ class _YoloPageState extends State<YoloPage> {
     }
   }
 
-// === Send to server ===
   Future<void> _sendDetectionToServer(
     List<YOLOResult> results,
     Uint8List imageBytes,
   ) async {
     const String url = 'http://192.168.57.168:5000/upload_detection';
+
     try {
       var request = http.MultipartRequest('POST', Uri.parse(url));
-      double totalX = 0;
+
       final List<Map<String, dynamic>> jsonResults = results.map((r) {
         double xCenter = r.normalizedBox.left + (r.normalizedBox.width / 2);
         double yCenter = r.normalizedBox.top + (r.normalizedBox.height / 2);
         String position = PositionHelper.getCombinedPosition(xCenter, yCenter);
-        totalX += xCenter;
+
         return {
           'classIndex': r.classIndex,
           'className': r.className,
@@ -106,8 +102,6 @@ class _YoloPageState extends State<YoloPage> {
 
       request.fields['detections'] = jsonEncode(jsonResults);
       request.fields['selected_class'] = controller.selectedClass.value;
-
-      // Tambahkan data lokasi ke request
       request.fields['latitude'] = controller.latitude.value.toString();
       request.fields['longitude'] = controller.longitude.value.toString();
       request.fields['location_address'] = controller.currentAddress.value;
@@ -117,7 +111,7 @@ class _YoloPageState extends State<YoloPage> {
           'image',
           imageBytes,
           filename: 'capture_${DateTime.now().millisecondsSinceEpoch}.png',
-          contentType: http.MediaType('image', 'png'),
+          contentType: MediaType('image', 'png'),
         ),
       );
 
@@ -131,7 +125,7 @@ class _YoloPageState extends State<YoloPage> {
       debugPrint('[UPLOAD EXCEPTION] $e');
     }
   }
-// === Detection ===
+
   Widget _buildPositionInfo() {
     return Obx(() {
       if (controller.currentMode.value == DetectionMode.search &&
@@ -150,11 +144,11 @@ class _YoloPageState extends State<YoloPage> {
           );
         }
 
-        return Container(
-          height: 100, 
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        return SizedBox(
+          height: 100,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: targetObjects.length,
             itemBuilder: (context, index) {
               final result = targetObjects[index];
@@ -166,6 +160,7 @@ class _YoloPageState extends State<YoloPage> {
                 xCenter,
                 yCenter,
               );
+
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 6),
                 child: Padding(
@@ -214,11 +209,11 @@ class _YoloPageState extends State<YoloPage> {
               (objectCounts[indonesianLabel] ?? 0) + 1;
         }
 
-        return Container(
-          height: 80, 
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        return SizedBox(
+          height: 80,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: objectPositions.entries.length,
             itemBuilder: (context, index) {
               final entry = objectPositions.entries.elementAt(index);
@@ -228,16 +223,11 @@ class _YoloPageState extends State<YoloPage> {
               String uniquePositions = positions.toSet().join(', ');
 
               return Card(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                elevation: 2,
-                color: Colors.blue[50],
                 margin: const EdgeInsets.symmetric(horizontal: 4),
+                color: Colors.blue[50],
                 child: Padding(
                   padding: const EdgeInsets.all(8),
                   child: Row(
-                    mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(Icons.label, color: Colors.blue),
                       const SizedBox(width: 4),
@@ -271,28 +261,18 @@ class _YoloPageState extends State<YoloPage> {
             padding: const EdgeInsets.all(16.0),
             child: Obx(
               () => Row(
-                mainAxisAlignment: MainAxisAlignment.center, 
                 children: [
-                  const Icon(
-                    Icons.location_on,
-                    color: Colors.blue,
-                    size: 24,
-                  ), 
+                  const Icon(Icons.location_on, color: Colors.blue),
                   const SizedBox(width: 8),
                   Expanded(
-      
                     child: Text(
                       'Lokasi Anda: ${controller.currentAddress.value}',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
-                      textAlign: TextAlign
-                          .start,
-                      overflow: TextOverflow
-                          .ellipsis,
-                      maxLines:
-                          2,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
                     ),
                   ),
                 ],
@@ -309,16 +289,19 @@ class _YoloPageState extends State<YoloPage> {
                 onResult: (results) async {
                   try {
                     controller.clearResult();
-                    List<YOLOResult> filteredResults = results.where((r) {
+
+                    final filteredResults = results.where((r) {
                       return r.confidence >=
                               controller.confidenceThreshold.value &&
                           (controller.currentMode.value ==
                                   DetectionMode.navigation ||
                               r.className == controller.selectedClass.value);
                     }).toList();
+
                     controller.onResult(filteredResults);
+
                     if (filteredResults.isNotEmpty) {
-                      Uint8List? pngBytes = await _capturePng();
+                      final pngBytes = await _capturePng();
                       if (pngBytes != null) {
                         await _sendDetectionToServer(filteredResults, pngBytes);
                       }
@@ -334,7 +317,7 @@ class _YoloPageState extends State<YoloPage> {
         ],
       ),
       bottomNavigationBar: Container(
-        color: const ui.Color.fromARGB(255, 255, 255, 255),
+        color: Colors.white,
         padding: const EdgeInsets.symmetric(vertical: 16),
         child: Obx(
           () => Row(
@@ -345,9 +328,7 @@ class _YoloPageState extends State<YoloPage> {
                 label: 'Navigasi',
                 isSelected:
                     controller.currentMode.value == DetectionMode.navigation,
-                onTap: () {
-                  controller.setMode(DetectionMode.navigation);
-                },
+                onTap: () => controller.setMode(DetectionMode.navigation),
               ),
               _buildNavItem(
                 icon: Icons.search,
