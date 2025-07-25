@@ -2,7 +2,7 @@ import 'package:get/get.dart';
 import 'package:ultralytics_yolo/ultralytics_yolo.dart';
 import 'package:ultralytics_yolo/yolo.dart';
 import 'package:ultralytics_yolo/yolo_task.dart';
-import 'package:yolodetection/app/modules/home/views/home_view.dart';
+// import 'package:yolodetection/app/modules/home/views/home_view.dart';
 import 'package:yolodetection/app/utils/indonesianLabels.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
@@ -10,6 +10,43 @@ import 'dart:async';
 import 'package:flutter_tts/flutter_tts.dart';
 
 enum DetectionMode { navigation, search }
+
+class PositionHelper {
+  static String getHorizontalCategory(double xCenter) {
+    if (xCenter < 0.33) return "KIRI";
+    if (xCenter > 0.66) return "KANAN";
+    return "DEPAN";
+  }
+
+  static String getVerticalCategory(double yCenter) {
+    if (yCenter < 0.33) return "ATAS";
+    if (yCenter > 0.66) return "BAWAH";
+    return "DEPAN";
+  }
+
+  static String getCombinedPosition(double xCenter, double yCenter) {
+    final horizontal = getHorizontalCategory(xCenter);
+    final vertical = getVerticalCategory(yCenter);
+
+
+    if (horizontal == vertical) return horizontal;
+    return "$horizontal-$vertical";
+  }
+
+  static String formatForSpeech(String position) {
+    if (position.contains('-')) {
+      final parts = position.split('-');
+      if (parts[0] == "DEPAN") return "depan ${parts[1].toLowerCase()}";
+      if (parts[1] == "DEPAN") return "${parts[0].toLowerCase()} depan";
+      return "${parts[0].toLowerCase()} ${parts[1].toLowerCase()}";
+    }
+    return position.toLowerCase();
+  }
+
+  static String formatForDisplay(String position) {
+    return position.toLowerCase().replaceAll('DEPAN', 'depan');
+  }
+}
 
 class YoloController extends GetxController {
   final YOLOViewController yoloViewController = YOLOViewController();
@@ -36,8 +73,11 @@ class YoloController extends GetxController {
 
   StreamSubscription<Position>? _positionStreamSubscription;
   Timer? _detectionTimer;
-
   Timer? _noObjectFoundTimer;
+  Timer? _navigationSummaryTimer;
+  final RxMap<String, Map<String, int>> _objectSummary =
+      <String, Map<String, int>>{}.obs;
+
   @override
   void onInit() {
     super.onInit();
@@ -51,7 +91,7 @@ class YoloController extends GetxController {
     yoloViewController.setZoomLevel(zoomLevel.value);
     yoloViewController.switchModel(currentModel.value, currentTask.value);
 
-    // Memulai pembaruan lokasi, deteksi akan dimulai setelah lokasi pertama didapat
+    // Memulai pembaruan lokasi
     _startLocationUpdates();
   }
 
@@ -67,7 +107,7 @@ class YoloController extends GetxController {
     _speechCompleter = Completer<void>();
     _isSpeaking.value = true;
     await flutterTts.speak(text);
-    Future.delayed(const Duration(seconds: 10), () {
+    Future.delayed(const Duration(seconds: 20), () {
       if (!_speechCompleter!.isCompleted) {
         _isSpeaking.value = false;
         _speechCompleter!.complete();
@@ -87,22 +127,49 @@ class YoloController extends GetxController {
     });
   }
 
-  // Fungsi untuk melakukan pengumuman berurutan di awal
   Future<void> _performInitialAnnouncements() async {
     // 1. Umumkan lokasi
     await speak("Sekarang Anda ada di ${currentAddress.value}");
 
     // 2. Umumkan masuk ke mode navigasi
-    await speak("Anda masuk ke mode navigasi.");
+    await speak("Anda berada di mode navigasi");
 
-    // 3. Mulai timer deteksi setelah semua pengumuman selesai
-    startDetectionInterval();
+    // 3. Mulai timer ringkasan navigasi
+    _startNavigationSummaryTimer();
+  }
+
+  void _startNavigationSummaryTimer() {
+    _navigationSummaryTimer?.cancel();
+    _navigationSummaryTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!_isSpeaking.value && _objectSummary.isNotEmpty) {
+        _announceNavigationSummary();
+      }
+    });
+  }
+
+  Future<void> _announceNavigationSummary() async {
+    if (_objectSummary.isEmpty) return;
+
+    final List<String> summaries = [];
+    _objectSummary.forEach((className, positions) {
+      final label = getIndonesianLabel(className);
+      positions.forEach((position, count) {
+        final posText = PositionHelper.formatForSpeech(position);
+        summaries.add("$count $label di $posText");
+      });
+    });
+
+    if (summaries.isNotEmpty) {
+      final text = "Di sekitar Anda terdapat ${summaries.join(', ')}";
+      await speak(text);
+      _objectSummary.clear();
+    }
   }
 
   void startDetectionInterval() {
     if (_detectionTimer?.isActive ?? false) return;
 
-    _detectionTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _detectionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       detectAndAnnounce();
     });
   }
@@ -114,15 +181,13 @@ class YoloController extends GetxController {
   Future<void> detectAndAnnounce() async {
     if (_isSpeaking.value) return;
 
-    List<YOLOResult> resultsToAnnounce = [];
-
     if (currentMode.value == DetectionMode.search && selectedClass.isNotEmpty) {
       if (lastResults.isEmpty) {
         _startNoObjectFoundTimer();
         return;
       }
 
-      resultsToAnnounce = lastResults
+      final resultsToAnnounce = lastResults
           .where((r) => r.className == selectedClass.value)
           .toList();
 
@@ -130,53 +195,56 @@ class YoloController extends GetxController {
         _startNoObjectFoundTimer();
         return;
       } else {
-        _cancelNoObjectFoundTimer(); // objek ditemukan, cancel timer
+        _cancelNoObjectFoundTimer();
       }
-    } else if (currentMode.value == DetectionMode.navigation) {
-      if (lastResults.isEmpty) return;
 
-      resultsToAnnounce = List<YOLOResult>.from(lastResults);
+      final topResult = resultsToAnnounce.first;
+
+      final label = getIndonesianLabel(topResult.className);
+      final xCenter =
+          topResult.normalizedBox.left + (topResult.normalizedBox.width / 2);
+      final yCenter =
+          topResult.normalizedBox.top + (topResult.normalizedBox.height / 2);
+      final rawPosition = PositionHelper.getCombinedPosition(xCenter, yCenter);
+      final formattedPosition = PositionHelper.formatForSpeech(rawPosition);
+
+      final lastPosition = _lastSpokenPositions[topResult.className];
+      if (lastPosition == formattedPosition) return;
+
+      _lastSpokenPositions[topResult.className] = formattedPosition;
+
+      final text = "$label ada di $formattedPosition Anda";
+      await speak(text);
     }
+  }
 
-    if (resultsToAnnounce.isEmpty) return;
+  void _startNoObjectFoundTimer() {
+    if (_noObjectFoundTimer?.isActive ?? false) return;
 
-    resultsToAnnounce.sort((a, b) => b.confidence.compareTo(a.confidence));
-    final topResult = resultsToAnnounce.first;
+    _noObjectFoundTimer = Timer(const Duration(seconds: 2), () async {
+      final label = getIndonesianLabel(selectedClass.value);
+      await speak("Tidak ada $label di sekitar Anda.");
+    });
+  }
 
-    final label = getIndonesianLabel(topResult.className);
-    final xCenter =
-        topResult.normalizedBox.left + topResult.normalizedBox.width / 2;
-    final yCenter =
-        topResult.normalizedBox.top + topResult.normalizedBox.height / 2;
-    final rawPosition = PositionHelper.getCombinedPosition(xCenter, yCenter);
-    final formattedPosition = _formatSpeechPosition(rawPosition);
-
-    final lastPosition = _lastSpokenPositions[topResult.className];
-    if (lastPosition == formattedPosition) return;
-
-    _lastSpokenPositions[topResult.className] = formattedPosition;
-
-    final text = "Ada $label di bagian $formattedPosition Anda.";
-    await speak(text);
+  void _cancelNoObjectFoundTimer() {
+    _noObjectFoundTimer?.cancel();
   }
 
   void setMode(DetectionMode mode) async {
-    if (currentMode.value == mode && mode == DetectionMode.navigation) return;
-
     currentMode.value = mode;
     _lastSpokenPositions.clear();
+    _objectSummary.clear();
 
     if (mode == DetectionMode.navigation) {
       resetSelection();
-      _cancelNoObjectFoundTimer(); // <-- Tambahan ini
-      await speak("Anda masuk ke mode navigasi.");
+      _cancelNoObjectFoundTimer();
+      _startNavigationSummaryTimer();
+      await speak("Anda berada di mode navigasi");
+    } else {
+      _navigationSummaryTimer?.cancel();
+      speak("Anda berada di mode cari");
     }
-
-    startDetectionInterval();
-
-    print(
-      "Mode diubah ke: ${mode == DetectionMode.navigation ? 'Navigasi' : 'Cari'}",
-    );
   }
 
   void setSelectedClass(String className) async {
@@ -184,7 +252,7 @@ class YoloController extends GetxController {
     currentMode.value = DetectionMode.search;
 
     final indonesianLabel = getIndonesianLabel(className);
-    await speak("Anda masuk ke mode cari, Anda mencari $indonesianLabel.");
+    await speak("Anda mencari $indonesianLabel");
 
     startDetectionInterval();
   }
@@ -211,32 +279,18 @@ class YoloController extends GetxController {
     }
   }
 
-  void _startNoObjectFoundTimer() {
-    if (_noObjectFoundTimer?.isActive ?? false) return;
-
-    _noObjectFoundTimer = Timer(const Duration(seconds: 5), () async {
-      final label = getIndonesianLabel(selectedClass.value);
-      await speak("Tidak ada $label di sekitar Anda.");
-    });
-  }
-
-  void _cancelNoObjectFoundTimer() {
-    _noObjectFoundTimer?.cancel();
-  }
-
   @override
   void onClose() {
     stopDetectionInterval();
+    _navigationSummaryTimer?.cancel();
     flutterTts.stop();
     _isSpeaking.value = false;
     _lastSpokenPositions.clear();
     _positionStreamSubscription?.cancel();
     _noObjectFoundTimer?.cancel();
-
     super.onClose();
   }
 
-  // Method untuk mendapatkan label Indonesia
   String getIndonesianLabel(String className) {
     final lowerClassName = className.toLowerCase();
     for (var entry in indonesianLabels.entries) {
@@ -259,21 +313,39 @@ class YoloController extends GetxController {
 
   void resetSelection() {
     selectedClass.value = '';
-    print("Reset seleksi - Kembali ke mode navigasi");
   }
 
   void onResult(List<YOLOResult> results) {
-    print('[YOLO DEBUG] YOLOView: Received ${results.length} detections');
-    lastResults.value = results.where((r) {
+    List<YOLOResult> filteredResults = results.where((r) {
       return r.confidence >= confidenceThreshold.value;
     }).toList();
+
+    lastResults.value = filteredResults;
+
+    if (currentMode.value == DetectionMode.navigation) {
+      final Map<String, Map<String, int>> currentSummary = {};
+
+      for (final result in filteredResults) {
+        final className = result.className;
+        final xCenter =
+            result.normalizedBox.left + (result.normalizedBox.width / 2);
+        final yCenter =
+            result.normalizedBox.top + (result.normalizedBox.height / 2);
+        final position = PositionHelper.getCombinedPosition(xCenter, yCenter);
+
+        currentSummary[className] ??= {};
+        currentSummary[className]![position] =
+            (currentSummary[className]![position] ?? 0) + 1;
+      }
+
+      _objectSummary.value = currentSummary;
+    }
   }
 
   void clearResult() {
     lastResults.clear();
   }
 
-  /// Memulai pembaruan lokasi secara real-time.
   Future<void> _startLocationUpdates() async {
     bool serviceEnabled;
     LocationPermission permission;
@@ -300,7 +372,6 @@ class YoloController extends GetxController {
       );
     }
 
-    // Jika izin diberikan, mulai perubahan lokasi
     _positionStreamSubscription =
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
@@ -312,25 +383,10 @@ class YoloController extends GetxController {
             latitude.value = position.latitude;
             longitude.value = position.longitude;
             _getAddressFromLatLng(position.latitude, position.longitude);
-            print(
-              'Lokasi diperbarui: ${position.latitude}, ${position.longitude}',
-            );
           },
           onError: (e) {
             currentAddress.value = 'Gagal mendapatkan lokasi: $e';
-            print('Error getting location stream: $e');
           },
         );
-  }
-
-  String _formatSpeechPosition(String position) {
-    if (position == 'TENGAH-TENGAH') return 'tengah';
-    final parts = position.split('-');
-    if (parts.length == 2) {
-      if (parts[0] == 'TENGAH') return parts[1].toLowerCase();
-      if (parts[1] == 'TENGAH') return parts[0].toLowerCase();
-      return "${parts[0].toLowerCase()} dan ${parts[1].toLowerCase()}";
-    }
-    return position.toLowerCase();
   }
 }
